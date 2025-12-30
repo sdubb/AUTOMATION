@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connection Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .test-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+        }
+        .test-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+        }
+        .test-card h3 {
+            margin: 0 0 15px 0;
+            color: #333;
+            font-size: 18px;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .status-icon {
+            font-size: 24px;
+            width: 32px;
+            text-align: center;
+        }
+        .status-connected {
+            color: #10b981;
+        }
+        .status-failed {
+            color: #ef4444;
+        }
+        .status-pending {
+            color: #f59e0b;
+        }
+        .latency {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+        }
+        .error {
+            font-size: 12px;
+            color: #ef4444;
+            margin-top: 10px;
+            padding: 10px;
+            background: #fee2e2;
+            border-radius: 4px;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 40px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: block;
+            margin: 0 auto;
+            width: 100%;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .summary.success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+        .summary.error {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Connection Test Dashboard</h1>
+        
+        <div class="test-grid" id="testGrid">
+            <!-- Tests will be inserted here -->
+        </div>
+
+        <button id="testButton" onclick="runTests()">Run All Tests</button>
+
+        <div id="summary" style="margin-top: 40px;"></div>
+    </div>
+
+    <script>
+        const ACTIVEPIECES_URL = 'http://172.17.0.4:3000/api';
+
+        const tests = [
+            {
+                name: 'ActivePieces API',
+                url: `${ACTIVEPIECES_URL}/health`,
+                description: 'Core backend service (includes PostgreSQL + Redis)',
+            },
+            {
+                name: 'Groq AI API',
+                url: 'https://api.groq.com/openai/v1/models',
+                description: 'AI automation planning engine',
+                needsAuth: true,
+            },
+            {
+                name: 'PostgreSQL Database',
+                url: `${ACTIVEPIECES_URL}/v1/projects`,
+                description: 'Data persistence (via ActivePieces)',
+            },
+            {
+                name: 'Redis Queue',
+                url: `${ACTIVEPIECES_URL}/health`,
+                description: 'Job queue & caching (via ActivePieces)',
+            },
+        ];
+
+        function createTestCard(test, index) {
+            const card = document.createElement('div');
+            card.className = 'test-card';
+            card.id = `test-${index}`;
+            card.innerHTML = `
+                <h3>${test.name}</h3>
+                <p style="color: #666; font-size: 13px; margin: 0 0 15px 0;">${test.description}</p>
+                <div class="status status-pending" id="status-${index}">
+                    <span class="status-icon">⏳</span>
+                    <span>Testing...</span>
+                </div>
+                <div id="details-${index}"></div>
+            `;
+            return card;
+        }
+
+        async function testConnection(test, index) {
+            const start = Date.now();
+            const statusEl = document.getElementById(`status-${index}`);
+            const detailsEl = document.getElementById(`details-${index}`);
+            
+            try {
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+
+                if (test.needsAuth) {
+                    const groqKey = localStorage.getItem('groq_key') || prompt('Enter Groq API Key (or press Cancel to skip):');
+                    if (!groqKey) {
+                        statusEl.innerHTML = '<span class="status-icon">⊘</span><span>Skipped</span>';
+                        statusEl.className = 'status status-pending';
+                        detailsEl.innerHTML = '<div class="latency">No API key provided</div>';
+                        return;
+                    }
+                    headers['Authorization'] = `Bearer ${groqKey}`;
+                }
+
+                const response = await fetch(test.url, {
+                    method: 'GET',
+                    headers,
+                });
+
+                const latency = Date.now() - start;
+
+                if (response.ok) {
+                    statusEl.innerHTML = `<span class="status-icon">✅</span><span>Connected</span>`;
+                    statusEl.className = 'status status-connected';
+                    detailsEl.innerHTML = `<div class="latency">Latency: ${latency}ms</div>`;
+                } else {
+                    statusEl.innerHTML = `<span class="status-icon">⚠️</span><span>HTTP ${response.status}</span>`;
+                    statusEl.className = 'status status-failed';
+                    detailsEl.innerHTML = `<div class="error">Status: ${response.status} ${response.statusText}</div>`;
+                }
+            } catch (err) {
+                statusEl.innerHTML = `<span class="status-icon">❌</span><span>Failed</span>`;
+                statusEl.className = 'status status-failed';
+                const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                detailsEl.innerHTML = `<div class="error">${errorMsg}</div>`;
+            }
+        }
+
+        function initializeTests() {
+            const grid = document.getElementById('testGrid');
+            grid.innerHTML = '';
+            tests.forEach((test, index) => {
+                grid.appendChild(createTestCard(test, index));
+            });
+        }
+
+        async function runTests() {
+            const button = document.getElementById('testButton');
+            button.disabled = true;
+            button.textContent = 'Running Tests...';
+
+            initializeTests();
+
+            // Run all tests in parallel
+            await Promise.all(
+                tests.map((test, index) => testConnection(test, index))
+            );
+
+            // Check results
+            const failedCount = Array.from(document.querySelectorAll('.status-failed')).length;
+            const passedCount = Array.from(document.querySelectorAll('.status-connected')).length;
+
+            const summary = document.getElementById('summary');
+            if (failedCount === 0 && passedCount > 0) {
+                summary.className = 'summary success';
+                summary.innerHTML = '✅ All Connections Successful!<br><small style="opacity: 0.9;">Ready for production</small>';
+            } else if (failedCount > 0) {
+                summary.className = 'summary error';
+                summary.innerHTML = `⚠️ ${failedCount} Connection(s) Failed<br><small style="opacity: 0.9;">Check configuration and try again</small>`;
+            } else {
+                summary.className = 'summary';
+                summary.innerHTML = '🔄 Run tests to check connections';
+            }
+
+            button.disabled = false;
+            button.textContent = 'Run All Tests Again';
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            initializeTests();
+            // Auto-run tests
+            runTests();
+        });
+    </script>
+</body>
+</html>
